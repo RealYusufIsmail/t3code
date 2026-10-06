@@ -2,6 +2,9 @@ import type { StorageCleanupSettings, WorktreeCleanupRules } from "@t3tools/cont
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { useRef, useState } from "react";
 
+import { FolderOpenIcon } from "lucide-react";
+import { ensureLocalApi } from "../../localApi";
+import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -29,7 +32,7 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
-function WorktreesDirectoryRow() {
+export function WorktreesDirectoryRow() {
   const { connectedEnvironments, targets } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -44,40 +47,76 @@ function WorktreesDirectoryRow() {
     return null;
   const scopeKey = targets.map((target) => target.environmentId).join(",");
 
+  const handlePickFolder = async () => {
+    try {
+      const api = ensureLocalApi();
+      const picked = await api.dialogs.pickFolder({
+        initialPath: settings.worktreesDirectory || null,
+      });
+      if (picked) {
+        updateSettings({ worktreesDirectory: picked.trim() });
+      }
+    } catch {
+      // Ignore picker failures / cancellations
+    }
+  };
+
   return (
     <SettingsRow
       {...searchableSetting("storage-worktrees-location")}
-      description={
-        "Folder where new worktrees are created, on any drive, such as D:\\worktrees or ~/worktrees. Existing worktrees stay where they are. Leave empty to use the T3 home folder."
-      }
+      title="Worktree Storage Directory"
+      description="Directory where git worktrees for threads are created. Point this to an external drive to save internal disk space."
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
         mixed || settings.worktreesDirectory !== "" ? (
           <SettingResetButton
-            label="worktree location"
+            label="Worktree Storage Directory"
             onClick={() => updateSettings({ worktreesDirectory: "" })}
           />
         ) : null
       }
       control={
-        <Input
-          key={`${scopeKey}:${mixed}:${settings.worktreesDirectory}`}
-          aria-label="Worktree location"
-          autoCapitalize="none"
-          spellCheck={false}
-          placeholder={mixed ? "Mixed" : "Default"}
-          defaultValue={mixed ? "" : settings.worktreesDirectory}
-          onChange={() => {
-            edited.current = true;
-          }}
-          onBlur={(event) => {
-            const value = event.target.value.trim();
-            if (edited.current && (mixed || value !== settings.worktreesDirectory))
-              updateSettings({ worktreesDirectory: value });
-            edited.current = false;
-          }}
-        />
+        <div className="flex w-full items-center gap-2 @min-[32rem]/settings-row:w-80">
+          <Input
+            key={`${scopeKey}:${mixed}:${settings.worktreesDirectory}`}
+            aria-label="Worktree Storage Directory"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder={mixed ? "Mixed" : "~/.t3/worktrees (default)"}
+            defaultValue={mixed ? "" : settings.worktreesDirectory}
+            onChange={() => {
+              edited.current = true;
+            }}
+            onBlur={(event) => {
+              const value = event.target.value.trim();
+              if (edited.current && (mixed || value !== settings.worktreesDirectory))
+                updateSettings({ worktreesDirectory: value });
+              edited.current = false;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                const value = event.currentTarget.value.trim();
+                if (mixed || value !== settings.worktreesDirectory) {
+                  updateSettings({ worktreesDirectory: value });
+                }
+                edited.current = false;
+                event.currentTarget.blur();
+              }
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handlePickFolder}
+            aria-label="Choose worktree directory"
+            title="Browse folder"
+            className="shrink-0"
+          >
+            <FolderOpenIcon className="size-4" />
+          </Button>
+        </div>
       }
     />
   );

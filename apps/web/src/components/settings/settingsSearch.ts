@@ -145,10 +145,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-worktrees-location",
-    title: "Worktree location",
+    title: "Worktree Storage Directory",
     to: "/settings/storage",
     scope: "environment-defaults",
-    searchTerms: ["worktree location folder directory path drive external disk"],
+    searchTerms: ["worktree location folder directory path drive external disk ssd storage"],
   },
   {
     id: "storage-artifacts",

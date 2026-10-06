@@ -14,8 +14,9 @@ export function resolveWorktreesDirectory(
   defaultDir: string,
   path: Path.Path,
 ): string | null {
-  if (setting === "") return defaultDir;
-  const expanded = expandHomePathWith(setting, path);
+  const trimmed = setting.trim();
+  if (trimmed === "") return defaultDir;
+  const expanded = expandHomePathWith(trimmed, path);
   if (!path.isAbsolute(expanded)) return null;
   const resolved = path.resolve(expanded);
   return isFilesystemRoot(resolved, path) ? null : resolved;

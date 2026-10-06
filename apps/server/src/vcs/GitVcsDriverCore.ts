@@ -3368,6 +3368,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       worktreePath = path.join(parentDir, repoName, sanitizedBranch);
     }
+    yield* fileSystem.makeDirectory(path.dirname(worktreePath), { recursive: true }).pipe(
+      Effect.mapError((cause) => {
+        const customConfigured = Boolean(options?.worktreesDirectory?.trim());
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return new GitCommandError({
+          operation: "GitVcsDriver.createWorktree",
+          command: "mkdir -p",
+          cwd: input.cwd,
+          detail: customConfigured
+            ? `The worktree storage directory "${path.dirname(worktreePath)}" is not accessible or writable: ${message}. Verify the storage location is accessible and writable, or change it in Settings → Storage.`
+            : `Failed to create worktree directory "${path.dirname(worktreePath)}": ${message}.`,
+        });
+      }),
+    );
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];

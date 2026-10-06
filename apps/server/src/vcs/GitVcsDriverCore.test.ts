@@ -3017,6 +3017,19 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           )
           .pipe(Effect.flip);
         assert.match(rootError.detail, /not a drive root/);
+
+        const nestedSubdir = pathService.join(worktreesDirectory, "nested", "custom-path");
+        const nestedCreated = yield* driver.createWorktree(
+          { cwd, path: null, refName: initialBranch, newRefName: "feature/nested-dir" },
+          { worktreesDirectory: nestedSubdir },
+        );
+        const expectedNested = pathService.join(
+          nestedSubdir,
+          pathService.basename(cwd),
+          "feature-nested-dir",
+        );
+        assert.equal(nestedCreated.worktree.path, expectedNested);
+        assert.equal(yield* fileSystem.exists(expectedNested), true);
       }),
     );
 
