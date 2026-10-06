@@ -342,6 +342,47 @@ describe("StorageSettings Worktree Storage Directory", () => {
     });
   });
 
+  it("does not open the picker when WSL state lookup fails", async () => {
+    state.primaryEnvironmentId = "env-primary";
+    state.connectedEnvironments = [
+      {
+        environmentId: "env-primary",
+        displayUrl: "http://primary.local",
+        entry: { target: { _tag: "PrimaryConnectionTarget" } },
+        serverConfig: {
+          environment: {
+            capabilities: { worktreesDirectory: true },
+            platform: { os: "linux" },
+          },
+        },
+      },
+    ];
+    state.targets = [{ environmentId: "env-primary", settings: state.settings }];
+    state.desktopLocalBootstraps = [];
+    setDesktopBridge({
+      getLocalEnvironmentBootstraps: () => [{ id: "primary", httpBaseUrl: "http://primary.local" }],
+      getWslState: async () => {
+        throw new Error("WSL state unavailable");
+      },
+    });
+
+    act(() => {
+      renderer = create(
+        <StrictMode>
+          <WorktreesDirectoryRow />
+        </StrictMode>,
+      );
+    });
+
+    await act(async () => {
+      await renderer!.root
+        .findByProps({ "aria-label": "Choose worktree directory" })
+        .props.onClick();
+    });
+
+    expect(state.pickFolder).not.toHaveBeenCalled();
+  });
+
   it("renders reset button when custom directory is configured and resets to empty string", () => {
     state.settings = {
       ...DEFAULT_UNIFIED_SETTINGS,

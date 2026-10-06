@@ -105,7 +105,7 @@ export function WorktreesDirectoryRow() {
       const api = ensureLocalApi();
       let targetEnvironmentId = pickerBackendId?.startsWith("wsl:") ? pickerBackendId : null;
       if (isDesktopPrimary && pickerEnvironment.serverConfig?.environment.platform.os === "linux") {
-        const wslConfiguration = await window.desktopBridge?.getWslState().catch(() => null);
+        const wslConfiguration = await window.desktopBridge?.getWslState();
         targetEnvironmentId = resolveProjectPickerTarget({
           browseEnvironmentId: pickerEnvironment.environmentId,
           primaryEnvironmentId,
