@@ -1,9 +1,17 @@
-import type { StorageCleanupSettings, WorktreeCleanupRules } from "@t3tools/contracts";
+import {
+  PRIMARY_LOCAL_ENVIRONMENT_ID,
+  type StorageCleanupSettings,
+  type WorktreeCleanupRules,
+} from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { useRef, useState } from "react";
 
 import { FolderOpenIcon } from "lucide-react";
 import { ensureLocalApi } from "../../localApi";
+import { desktopLocalBackendId } from "../../connection/desktopLocal";
+import { useDesktopLocalBootstraps } from "../../connection/useDesktopLocalBootstraps";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { resolveProjectPickerTarget } from "../../wslPaths";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -32,8 +40,25 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
+function hasDesktopPrimaryBootstrap(displayUrl: string | null): boolean {
+  const bridge = typeof window === "undefined" ? undefined : window.desktopBridge;
+  if (!bridge || displayUrl === null) return false;
+  try {
+    return bridge
+      .getLocalEnvironmentBootstraps()
+      .some(
+        (bootstrap) =>
+          bootstrap.id === PRIMARY_LOCAL_ENVIRONMENT_ID && bootstrap.httpBaseUrl === displayUrl,
+      );
+  } catch {
+    return false;
+  }
+}
+
 export function WorktreesDirectoryRow() {
   const { connectedEnvironments, targets } = useSettingsScope();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const mixed = useScopedSettingsMixed(["worktreesDirectory"]);
@@ -46,12 +71,51 @@ export function WorktreesDirectoryRow() {
   )
     return null;
   const scopeKey = targets.map((target) => target.environmentId).join(",");
+  const targetEnvironmentIds = new Set(targets.map((target) => target.environmentId));
+  const pickerEnvironmentId =
+    targetEnvironmentIds.size === 1 ? targetEnvironmentIds.values().next().value : undefined;
+  const pickerEnvironment =
+    pickerEnvironmentId === undefined
+      ? null
+      : (connectedEnvironments.find(
+          (environment) => environment.environmentId === pickerEnvironmentId,
+        ) ?? null);
+  const pickerBackendId =
+    pickerEnvironment === null ? null : desktopLocalBackendId(pickerEnvironment.entry.target);
+  const isDesktopPrimary =
+    pickerEnvironment !== null &&
+    pickerEnvironment.environmentId === primaryEnvironmentId &&
+    hasDesktopPrimaryBootstrap(pickerEnvironment.displayUrl);
+  const isDesktopWslBackend =
+    pickerEnvironment !== null &&
+    pickerBackendId?.startsWith("wsl:") === true &&
+    pickerEnvironment.displayUrl !== null &&
+    desktopLocalBootstraps.some(
+      (bootstrap) =>
+        bootstrap.id === pickerBackendId && bootstrap.httpBaseUrl === pickerEnvironment.displayUrl,
+    );
+  const canPickFolder =
+    typeof window !== "undefined" &&
+    window.desktopBridge !== undefined &&
+    (isDesktopPrimary || isDesktopWslBackend);
 
   const handlePickFolder = async () => {
+    if (!canPickFolder || pickerEnvironment === null) return;
     try {
       const api = ensureLocalApi();
+      let targetEnvironmentId = pickerBackendId?.startsWith("wsl:") ? pickerBackendId : null;
+      if (isDesktopPrimary && pickerEnvironment.serverConfig?.environment.platform.os === "linux") {
+        const wslConfiguration = await window.desktopBridge?.getWslState().catch(() => null);
+        targetEnvironmentId = resolveProjectPickerTarget({
+          browseEnvironmentId: pickerEnvironment.environmentId,
+          primaryEnvironmentId,
+          desktopInstanceId: null,
+          wslConfiguration: wslConfiguration ?? null,
+        });
+      }
       const picked = await api.dialogs.pickFolder({
         initialPath: settings.worktreesDirectory || null,
+        ...(targetEnvironmentId === null ? {} : { targetEnvironmentId }),
       });
       if (picked) {
         updateSettings({ worktreesDirectory: picked.trim() });
@@ -105,17 +169,19 @@ export function WorktreesDirectoryRow() {
               }
             }}
           />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handlePickFolder}
-            aria-label="Choose worktree directory"
-            title="Browse folder"
-            className="shrink-0"
-          >
-            <FolderOpenIcon className="size-4" />
-          </Button>
+          {canPickFolder ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handlePickFolder}
+              aria-label="Choose worktree directory"
+              title="Browse folder"
+              className="shrink-0"
+            >
+              <FolderOpenIcon className="size-4" />
+            </Button>
+          ) : null}
         </div>
       }
     />

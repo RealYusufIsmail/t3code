@@ -3033,6 +3033,76 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("resolves relative worktree paths against the repository directory", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const relativePath = path.join(`relative-${path.basename(cwd)}`, "nested-worktree");
+        const wrongParent = path.resolve(process.cwd(), path.dirname(relativePath));
+
+        yield* Effect.addFinalizer(() =>
+          fileSystem
+            .remove(wrongParent, { recursive: true })
+            .pipe(Effect.orElseSucceed(() => undefined)),
+        );
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          path: relativePath,
+          refName: initialBranch,
+          newRefName: "feature/relative-path",
+        });
+        const expectedPath = path.resolve(cwd, relativePath);
+
+        assert.equal(created.worktree.path, expectedPath);
+        assert.equal(yield* fileSystem.exists(expectedPath), true);
+        assert.equal(yield* fileSystem.exists(wrongParent), false);
+      }),
+    );
+
+    it.effect("keeps worktree directory errors bounded and preserves their cause", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const blocker = path.join(yield* makeTmpDir(), "file-not-directory");
+        yield* fileSystem.writeFileString(blocker, "file");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const configuredError = yield* driver
+          .createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "feature/configured-failure" },
+            { worktreesDirectory: path.join(blocker, "worktrees") },
+          )
+          .pipe(Effect.flip);
+        assert.equal(
+          configuredError.detail,
+          "Could not create the configured worktree storage directory. Check that the location is accessible and writable, or update Settings → Storage.",
+        );
+        assert.isDefined(configuredError.cause);
+        assert.notInclude(configuredError.detail, blocker);
+
+        const explicitError = yield* driver
+          .createWorktree(
+            {
+              cwd,
+              path: path.join(blocker, "explicit-worktree"),
+              refName: initialBranch,
+              newRefName: "feature/explicit-failure",
+            },
+            { worktreesDirectory: path.join(blocker, "worktrees") },
+          )
+          .pipe(Effect.flip);
+        assert.equal(explicitError.detail, "Could not prepare the requested worktree directory.");
+        assert.isDefined(explicitError.cause);
+        assert.notInclude(explicitError.detail, blocker);
+      }),
+    );
+
     it.effect("resolves the submodule mode from the option, then t3.json", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;

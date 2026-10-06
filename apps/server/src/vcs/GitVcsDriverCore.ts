@@ -3351,7 +3351,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const targetBranch = input.newRefName ?? input.refName;
     const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
-    let worktreePath = input.path;
+    let worktreePath = input.path == null ? null : path.resolve(input.cwd, input.path);
     if (worktreePath == null) {
       const parentDir = resolveWorktreesDirectory(
         options?.worktreesDirectory ?? "",
@@ -3368,17 +3368,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
       worktreePath = path.join(parentDir, repoName, sanitizedBranch);
     }
+    const customConfigured = input.path == null && Boolean(options?.worktreesDirectory?.trim());
     yield* fileSystem.makeDirectory(path.dirname(worktreePath), { recursive: true }).pipe(
       Effect.mapError((cause) => {
-        const customConfigured = Boolean(options?.worktreesDirectory?.trim());
-        const message = cause instanceof Error ? cause.message : String(cause);
         return new GitCommandError({
           operation: "GitVcsDriver.createWorktree",
           command: "mkdir -p",
           cwd: input.cwd,
           detail: customConfigured
-            ? `The worktree storage directory "${path.dirname(worktreePath)}" is not accessible or writable: ${message}. Verify the storage location is accessible and writable, or change it in Settings → Storage.`
-            : `Failed to create worktree directory "${path.dirname(worktreePath)}": ${message}.`,
+            ? "Could not create the configured worktree storage directory. Check that the location is accessible and writable, or update Settings → Storage."
+            : "Could not prepare the requested worktree directory.",
+          cause,
         });
       }),
     );

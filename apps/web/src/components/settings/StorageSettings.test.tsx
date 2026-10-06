@@ -9,8 +9,12 @@ import { WorktreesDirectoryRow } from "./StorageSettings";
 const state = vi.hoisted(() => ({
   settings: { worktreesDirectory: "" } as unknown as typeof DEFAULT_UNIFIED_SETTINGS,
   mixed: false,
+  connectedEnvironments: [] as Array<Record<string, unknown>>,
+  targets: [] as Array<Record<string, unknown>>,
+  primaryEnvironmentId: "env-primary",
+  desktopLocalBootstraps: [] as Array<Record<string, unknown>>,
   updateSettings: vi.fn<(patch: ScopedSettingsPatch) => void>(),
-  pickFolder: vi.fn<() => Promise<string | null>>(),
+  pickFolder: vi.fn<(options?: Record<string, unknown>) => Promise<string | null>>(),
 }));
 
 vi.mock("./useScopedSettings", () => ({
@@ -24,19 +28,17 @@ vi.mock("./SettingsScopeContext", () => ({
   useSettingsScope: () => ({
     scope: { kind: "all", environmentIds: [] },
     environment: null,
-    connectedEnvironments: [
-      {
-        serverConfig: {
-          environment: {
-            capabilities: {
-              worktreesDirectory: true,
-            },
-          },
-        },
-      },
-    ],
-    targets: [{ environmentId: "env-1", settings: state.settings }],
+    connectedEnvironments: state.connectedEnvironments,
+    targets: state.targets,
   }),
+}));
+
+vi.mock("../../connection/useDesktopLocalBootstraps", () => ({
+  useDesktopLocalBootstraps: () => state.desktopLocalBootstraps,
+}));
+
+vi.mock("../../state/environments", () => ({
+  usePrimaryEnvironmentId: () => state.primaryEnvironmentId,
 }));
 
 vi.mock("../../localApi", () => ({
@@ -83,14 +85,56 @@ vi.mock("./SettingsScopeNotice", () => ({
   SettingsScopeNotice: () => null,
 }));
 
+function setDesktopBridge(bridge: unknown) {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { desktopBridge: bridge },
+  });
+}
+
 describe("StorageSettings Worktree Storage Directory", () => {
   let renderer: ReactTestRenderer | null = null;
 
   beforeEach(() => {
     state.settings = { ...DEFAULT_UNIFIED_SETTINGS, worktreesDirectory: "" };
     state.mixed = false;
+    state.primaryEnvironmentId = "env-primary";
+    state.connectedEnvironments = [
+      {
+        environmentId: "env-wsl",
+        displayUrl: "http://wsl.local",
+        entry: {
+          target: {
+            _tag: "BearerConnectionTarget",
+            connectionId: "local:wsl:Ubuntu",
+          },
+        },
+        serverConfig: {
+          environment: {
+            capabilities: { worktreesDirectory: true },
+            platform: { os: "linux" },
+          },
+        },
+      },
+    ];
+    state.targets = [{ environmentId: "env-wsl", settings: state.settings }];
+    state.desktopLocalBootstraps = [{ id: "wsl:Ubuntu", httpBaseUrl: "http://wsl.local" }];
     state.updateSettings.mockClear();
     state.pickFolder.mockReset();
+    setDesktopBridge({
+      getLocalEnvironmentBootstraps: () => [
+        { id: "primary", httpBaseUrl: "http://primary.local" },
+        { id: "wsl:Ubuntu", httpBaseUrl: "http://wsl.local" },
+      ],
+      getWslState: async () => ({
+        enabled: false,
+        distro: null,
+        available: true,
+        wslOnly: false,
+        distros: [],
+        preflightError: null,
+      }),
+    });
   });
 
   it("renders Worktree Storage Directory with placeholder and description", () => {
@@ -156,9 +200,145 @@ describe("StorageSettings Worktree Storage Directory", () => {
       await browseButton.props.onClick();
     });
 
-    expect(state.pickFolder).toHaveBeenCalled();
+    expect(state.pickFolder).toHaveBeenCalledWith({
+      initialPath: null,
+      targetEnvironmentId: "wsl:Ubuntu",
+    });
     expect(state.updateSettings).toHaveBeenCalledWith({
       worktreesDirectory: "/Volumes/External/worktrees",
+    });
+  });
+
+  it("hides folder browsing when no desktop picker is available", () => {
+    setDesktopBridge(undefined);
+
+    act(() => {
+      renderer = create(
+        <StrictMode>
+          <WorktreesDirectoryRow />
+        </StrictMode>,
+      );
+    });
+
+    expect(
+      renderer!.root.findAllByProps({ "aria-label": "Choose worktree directory" }),
+    ).toHaveLength(0);
+    expect(
+      renderer!.root.findByProps({ "aria-label": "Worktree Storage Directory" }),
+    ).toBeDefined();
+  });
+
+  it("hides folder browsing for a scope spanning multiple environments", () => {
+    state.connectedEnvironments = [
+      ...state.connectedEnvironments,
+      {
+        environmentId: "env-other",
+        displayUrl: "http://other.local",
+        entry: { target: { _tag: "BearerConnectionTarget", connectionId: "remote:other" } },
+        serverConfig: {
+          environment: {
+            capabilities: { worktreesDirectory: true },
+            platform: { os: "linux" },
+          },
+        },
+      },
+    ];
+    state.targets = [...state.targets, { environmentId: "env-other", settings: state.settings }];
+
+    act(() => {
+      renderer = create(
+        <StrictMode>
+          <WorktreesDirectoryRow />
+        </StrictMode>,
+      );
+    });
+
+    expect(
+      renderer!.root.findAllByProps({ "aria-label": "Choose worktree directory" }),
+    ).toHaveLength(0);
+  });
+
+  it("keeps primary desktop browsing on the primary filesystem", async () => {
+    state.primaryEnvironmentId = "env-primary";
+    state.connectedEnvironments = [
+      {
+        environmentId: "env-primary",
+        displayUrl: "http://primary.local",
+        entry: { target: { _tag: "PrimaryConnectionTarget" } },
+        serverConfig: {
+          environment: {
+            capabilities: { worktreesDirectory: true },
+            platform: { os: "darwin" },
+          },
+        },
+      },
+    ];
+    state.targets = [{ environmentId: "env-primary", settings: state.settings }];
+    state.desktopLocalBootstraps = [];
+
+    act(() => {
+      renderer = create(
+        <StrictMode>
+          <WorktreesDirectoryRow />
+        </StrictMode>,
+      );
+    });
+
+    await act(async () => {
+      await renderer!.root
+        .findByProps({ "aria-label": "Choose worktree directory" })
+        .props.onClick();
+    });
+
+    expect(state.pickFolder).toHaveBeenCalledWith({ initialPath: null });
+  });
+
+  it("routes a WSL-only primary picker to its WSL backend", async () => {
+    state.primaryEnvironmentId = "env-primary";
+    state.connectedEnvironments = [
+      {
+        environmentId: "env-primary",
+        displayUrl: "http://primary.local",
+        entry: { target: { _tag: "PrimaryConnectionTarget" } },
+        serverConfig: {
+          environment: {
+            capabilities: { worktreesDirectory: true },
+            platform: { os: "linux" },
+          },
+        },
+      },
+    ];
+    state.targets = [{ environmentId: "env-primary", settings: state.settings }];
+    state.desktopLocalBootstraps = [];
+    setDesktopBridge({
+      getLocalEnvironmentBootstraps: () => [{ id: "primary", httpBaseUrl: "http://primary.local" }],
+      getWslState: async () => ({
+        enabled: true,
+        distro: "Ubuntu",
+        available: true,
+        wslOnly: true,
+        distros: [{ name: "Ubuntu", isDefault: true }],
+        preflightError: null,
+      }),
+    });
+
+    act(() => {
+      renderer = create(
+        <StrictMode>
+          <WorktreesDirectoryRow />
+        </StrictMode>,
+      );
+    });
+
+    await act(async () => {
+      await renderer!.root
+        .findByProps({ "aria-label": "Choose worktree directory" })
+        .props.onClick();
+    });
+
+    expect(state.pickFolder).toHaveBeenCalledWith({
+      initialPath: null,
+      targetEnvironmentId: "wsl:Ubuntu",
     });
   });
 
