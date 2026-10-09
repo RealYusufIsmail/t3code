@@ -12,6 +12,7 @@ export function preferences(settings: ServerSettings) {
   const {
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
+    defaultWorktreeBaseBranch,
     enableProviderUpdateChecks,
     backgroundActivity,
     sourceControlWritingStyle,
@@ -20,6 +21,7 @@ export function preferences(settings: ServerSettings) {
   return {
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
+    defaultWorktreeBaseBranch,
     enableProviderUpdateChecks,
     backgroundActivity: { profile: backgroundActivity.profile },
     sourceControlWritingStyle: {

@@ -1,12 +1,16 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { usePaginatedBranches } from "../state/queries";
 import { useEnvironmentQuery } from "../state/query";
 import { vcsEnvironment } from "../state/vcs";
 import { BranchPicker, BranchPickerRefItem } from "./BranchPicker";
-import { resolveBranchTriggerLabel, sanitizeNewRefName } from "./BranchToolbar.logic";
+import {
+  resolveBranchTriggerLabel,
+  resolveDefaultWorktreeBaseBranch,
+  sanitizeNewRefName,
+} from "./BranchToolbar.logic";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import { Button } from "./ui/button";
 import { ComboboxTrigger } from "./ui/combobox";
@@ -16,6 +20,7 @@ export function WorktreeBaseBranchPicker({
   environmentId,
   cwd,
   value,
+  defaultWorktreeBaseBranch,
   onValueChange,
   startFromOrigin,
   onStartFromOriginChange,
@@ -25,6 +30,7 @@ export function WorktreeBaseBranchPicker({
   environmentId: EnvironmentId;
   cwd: string | null;
   value: string;
+  defaultWorktreeBaseBranch: string | null | undefined;
   onValueChange: (branch: string) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (checked: boolean) => void;
@@ -47,14 +53,56 @@ export function WorktreeBaseBranchPicker({
         })
       : null,
   );
+  const defaultBranchRefsQuery = useEnvironmentQuery(
+    cwd && defaultWorktreeBaseBranch
+      ? vcsEnvironment.listRefs({
+          environmentId,
+          input: {
+            cwd,
+            query: defaultWorktreeBaseBranch,
+            includeMatchingRemoteRefs: true,
+            limit: 200,
+          },
+        })
+      : null,
+  );
+  const defaultBranch = resolveDefaultWorktreeBaseBranch({
+    configuredBranch: defaultWorktreeBaseBranch ?? null,
+    configuredBranchRefs: [...branches.refs, ...(defaultBranchRefsQuery.data?.refs ?? [])],
+    repoDefaultBranch: branches.refs.find((branch) => branch.isDefault)?.name ?? null,
+    currentBranch: branches.refs.find((branch) => branch.current)?.name ?? null,
+  });
+  const defaultBranchIsPending =
+    defaultWorktreeBaseBranch === undefined ||
+    (branches.isPending && branches.data === null) ||
+    (defaultWorktreeBaseBranch !== null &&
+      defaultBranchRefsQuery.isPending &&
+      defaultBranchRefsQuery.data === null);
+
+  useEffect(() => {
+    if (value || !cwd || defaultBranchIsPending) return;
+    if (defaultBranch !== null) onValueChange(defaultBranch);
+  }, [cwd, defaultBranch, defaultBranchIsPending, onValueChange, value]);
+
   const selectedRef =
     branches.refs.find((branch) => branch.name === value) ??
-    selectedRefQuery.data?.refs.find((branch) => branch.name === value);
+    selectedRefQuery.data?.refs.find((branch) => branch.name === value) ??
+    defaultBranchRefsQuery.data?.refs.find(
+      (branch) =>
+        branch.isRemote === true &&
+        branch.remoteName !== undefined &&
+        branch.name === `${branch.remoteName}/${value}`,
+    );
+  const selectedRefIsRemoteAlias = selectedRef?.isRemote === true && selectedRef.name !== value;
   const label = resolveBranchTriggerLabel({
     activeWorktreePath: null,
     effectiveEnvMode: "worktree",
     resolvedActiveBranch: value || null,
-    resolvedActiveBranchIsRemote: selectedRef ? selectedRef.isRemote === true : null,
+    resolvedActiveBranchIsRemote: selectedRef
+      ? selectedRefIsRemoteAlias
+        ? false
+        : selectedRef.isRemote === true
+      : null,
     startFromOrigin,
   });
   const branchByName = useMemo(

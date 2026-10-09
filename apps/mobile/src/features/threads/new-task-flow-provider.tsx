@@ -24,7 +24,10 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  resolveDefaultWorktreeBaseBranch,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
@@ -733,6 +736,23 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     [debouncedBranchQuery, selectedProject?.environmentId, selectedProject?.workspaceRoot],
   );
   const branchState = usePaginatedBranches(branchTarget);
+  const defaultWorktreeBaseBranch = projectSettings.settings.defaultWorktreeBaseBranch;
+  const defaultWorktreeBaseBranchRefsQuery = useEnvironmentQuery(
+    workspaceMode === "worktree" &&
+      branchTarget.environmentId !== null &&
+      branchTarget.cwd !== null &&
+      defaultWorktreeBaseBranch !== null
+      ? vcsEnvironment.listRefs({
+          environmentId: branchTarget.environmentId,
+          input: {
+            cwd: branchTarget.cwd,
+            query: defaultWorktreeBaseBranch,
+            includeMatchingRemoteRefs: true,
+            limit: 200,
+          },
+        })
+      : null,
+  );
   const branchSearchIsDebouncing = branchSearchQuery !== debouncedBranchQuery;
   const branchesLoading =
     branchSearchIsDebouncing || (branchState.isPending && branchState.data === null);
@@ -1004,8 +1024,12 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     if (
       !selectedProjectDraftKey ||
       !defaultWorkspaceModeSettled ||
+      selectedEnvironmentServerConfig === null ||
       workspaceMode !== "worktree" ||
-      selectedBranchName !== null
+      selectedBranchName !== null ||
+      (defaultWorktreeBaseBranch !== null &&
+        defaultWorktreeBaseBranchRefsQuery.isPending &&
+        defaultWorktreeBaseBranchRefsQuery.data === null)
     ) {
       return;
     }
@@ -1018,17 +1042,43 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     }
     // The default may only exist as origin/<default> (isRemote), which
     // availableBranches filters out — search the unfiltered refs for it.
+    const configuredBranchRefs = [
+      ...allBranchRefs,
+      ...(defaultWorktreeBaseBranchRefsQuery.data?.refs ?? []),
+    ];
+    const configuredBranchRef = defaultWorktreeBaseBranch
+      ? configuredBranchRefs.find((branch) =>
+          branch.isRemote
+            ? branch.remoteName !== undefined &&
+              branch.name === `${branch.remoteName}/${defaultWorktreeBaseBranch}`
+            : branch.name === defaultWorktreeBaseBranch,
+        )
+      : undefined;
+    const preferredBranchName = resolveDefaultWorktreeBaseBranch({
+      configuredBranch: defaultWorktreeBaseBranch,
+      configuredBranchRefs,
+      repoDefaultBranch: allBranchRefs.find((branch) => branch.isDefault)?.name ?? null,
+      currentBranch: availableBranches.find((branch) => branch.current)?.name ?? null,
+    });
     const preferredBranch =
-      allBranchRefs.find((branch) => branch.isDefault) ??
-      availableBranches.find((branch) => branch.current) ??
-      null;
+      configuredBranchRef &&
+      defaultWorktreeBaseBranch !== null &&
+      preferredBranchName === defaultWorktreeBaseBranch
+        ? configuredBranchRef.isRemote
+          ? { ...configuredBranchRef, name: defaultWorktreeBaseBranch, worktreePath: null }
+          : configuredBranchRef
+        : (allBranchRefs.find((branch) => branch.name === preferredBranchName) ?? null);
     if (preferredBranch) {
       selectBranch(preferredBranch);
     }
   }, [
     allBranchRefs,
     availableBranches,
+    defaultWorktreeBaseBranch,
+    defaultWorktreeBaseBranchRefsQuery.data,
+    defaultWorktreeBaseBranchRefsQuery.isPending,
     defaultWorkspaceModeSettled,
+    selectedEnvironmentServerConfig,
     selectBranch,
     selectedBranchName,
     selectedProjectDraftKey,

@@ -301,6 +301,7 @@ const clientLaunchHarness = (input: {
   readonly runtimeModeCeiling: "approval-required" | "auto-accept-edits" | "auto" | "full-access";
   readonly launched: Array<ThreadLaunch.ThreadLaunchInput>;
   readonly workspaceRoot?: string;
+  readonly defaultBaseBranch?: string;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = { instanceId: ProviderInstanceId.make("claude"), model: "claude-opus" };
@@ -320,6 +321,7 @@ const clientLaunchHarness = (input: {
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({}),
     Layer.mock(ThreadLaunch.ThreadLaunchService)({
+      resolveDefaultWorktreeBaseBranch: () => Effect.succeed(input.defaultBaseBranch ?? "main"),
       launch: (launch) => {
         input.launched.push(launch);
         return Effect.succeed({
@@ -362,6 +364,37 @@ const clientLaunchHarness = (input: {
   );
   return { projectId, modelSelection, dependencies: layerDependencies };
 };
+
+it.effect("a client launch resolves an omitted worktree base branch", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const { projectId, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "auto-accept-edits",
+      launched,
+      defaultBaseBranch: "dev",
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const handle = (params: Parameters<typeof toolkit.handle<"t3_thread_launch">>[1]) =>
+      toolkit
+        .handle("t3_thread_launch", params)
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    yield* handle({
+      title: "Fix",
+      projectId,
+      workspaceStrategy: { type: "worktree", branch: "feature/fix" },
+    });
+    expect(launched[0]?.workspaceStrategy).toEqual({
+      type: "worktree",
+      baseRef: "dev",
+      branch: "feature/fix",
+    });
+  }),
+);
 
 it.effect("a client launches at its ceiling with the project's default model", () =>
   Effect.gen(function* () {

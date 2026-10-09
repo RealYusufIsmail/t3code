@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
+import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
@@ -103,6 +104,23 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             });
           yield* assertProjectWorktree(project.workspaceRoot, input.workspaceStrategy.worktreePath);
         }
+        const workspaceStrategyInput = input.workspaceStrategy;
+        let workspaceStrategy: ThreadLaunchService.ThreadLaunchWorkspaceStrategy;
+        if (workspaceStrategyInput === undefined) {
+          workspaceStrategy = { type: "root" };
+        } else if (workspaceStrategyInput.type === "worktree") {
+          const baseRef =
+            workspaceStrategyInput.baseRef ??
+            (yield* ThreadLaunchService.ThreadLaunchService.pipe(
+              Effect.flatMap((service) =>
+                service.resolveDefaultWorktreeBaseBranch({ commandId, projectId }),
+              ),
+              Effect.mapError(unavailable),
+            ));
+          workspaceStrategy = { ...workspaceStrategyInput, baseRef };
+        } else {
+          workspaceStrategy = workspaceStrategyInput;
+        }
         const modelSelection =
           input.modelSelection ??
           caller?.modelSelection ??
@@ -122,7 +140,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           modelSelection,
           runtimeMode,
           interactionMode,
-          workspaceStrategy: input.workspaceStrategy ?? { type: "root" },
+          workspaceStrategy,
           ...(input.message === undefined && attachments.length === 0
             ? {}
             : {

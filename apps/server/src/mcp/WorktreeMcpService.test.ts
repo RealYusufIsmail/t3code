@@ -8,6 +8,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type VcsRef,
   WorktreeMcpHandoffInput,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -92,6 +93,10 @@ interface HarnessOptions {
   readonly currentBranch?: string | null;
   readonly notARepo?: boolean;
   readonly newWorktreesStartFromOrigin?: boolean;
+  readonly defaultWorktreeBaseBranch?: string | null;
+  readonly projectDefaultWorktreeBaseBranch?: string | null;
+  readonly localBranchNames?: readonly string[];
+  readonly refs?: readonly VcsRef[];
   readonly setupScript?: "started" | "no-script" | "fails" | "dies";
   readonly dispatchFails?: boolean;
   readonly dispatchDies?: boolean;
@@ -130,11 +135,12 @@ const makeHarness = (options: HarnessOptions = {}) => {
     ),
   );
   const listLocalBranchNames = vi.fn((_: string) =>
-    Effect.succeed(
-      options.existingBranchWorktreePath === undefined
-        ? ["dev"]
-        : ["dev", "feature/taken", "feature/taken-idle"],
-    ),
+    Effect.succeed([
+      ...(options.localBranchNames ??
+        (options.existingBranchWorktreePath === undefined
+          ? ["dev"]
+          : ["dev", "feature/taken", "feature/taken-idle"])),
+    ]),
   );
   const getThreadRecords = vi.fn((id: ThreadId) => {
     if (options.threadReadError === "dispatch") {
@@ -231,25 +237,33 @@ const makeHarness = (options: HarnessOptions = {}) => {
             ),
           ),
   );
-  const listRefs = vi.fn((input: { readonly query?: string | undefined }) =>
-    Effect.succeed({
-      refs:
-        options.existingBranchWorktreePath === undefined
-          ? []
-          : [
-              {
-                name: input.query ?? "",
-                current: false,
-                isDefault: false,
-                worktreePath: options.existingBranchWorktreePath,
-              },
-            ],
+  const listRefs = vi.fn((input: { readonly query?: string | undefined }) => {
+    const configuredRefs = (options.refs ?? []).filter(
+      (ref) =>
+        input.query === undefined ||
+        ref.name.includes(input.query) ||
+        (ref.isRemote === true && ref.name.endsWith(`/${input.query}`)),
+    );
+    const collisionRef =
+      options.existingBranchWorktreePath === undefined
+        ? []
+        : [
+            {
+              name: input.query ?? "",
+              current: false,
+              isDefault: false,
+              worktreePath: options.existingBranchWorktreePath,
+            },
+          ];
+    const refs = [...configuredRefs, ...collisionRef];
+    return Effect.succeed({
+      refs,
       isRepo: true,
       hasPrimaryRemote: true,
       nextCursor: null,
-      totalCount: options.existingBranchWorktreePath === undefined ? 0 : 1,
-    }),
-  );
+      totalCount: refs.length,
+    });
+  });
   const localStatus = vi.fn((_: unknown) =>
     Effect.succeed({
       isRepo: options.notARepo !== true,
@@ -317,6 +331,15 @@ const makeHarness = (options: HarnessOptions = {}) => {
         } satisfies Partial<ProjectService.ProjectService["Service"]>),
         ServerSettings.layerTest({
           newWorktreesStartFromOrigin: options.newWorktreesStartFromOrigin ?? false,
+          defaultWorktreeBaseBranch: options.defaultWorktreeBaseBranch ?? null,
+          projectSettingsOverrides:
+            options.projectDefaultWorktreeBaseBranch === undefined
+              ? {}
+              : {
+                  [projectId]: {
+                    defaultWorktreeBaseBranch: options.projectDefaultWorktreeBaseBranch,
+                  },
+                },
         }),
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           listRefs,
@@ -549,6 +572,44 @@ describe("t3_worktree_handoff", () => {
       expect(harness.fetchRemote).toHaveBeenCalled();
     });
   });
+
+  it.effect("uses the project's configured base branch when baseRef is omitted", () => {
+    const harness = makeHarness({
+      defaultWorktreeBaseBranch: "release",
+      projectDefaultWorktreeBaseBranch: "dev",
+      localBranchNames: ["main", "dev", "release"],
+    });
+    return Effect.gen(function* () {
+      const result = yield* runHandoff(harness, { branch: "feature/project-default" });
+
+      expect(result.baseRef).toBe("dev");
+      expect(harness.createWorktree).toHaveBeenCalledWith(
+        expect.objectContaining({ refName: "dev", baseRefName: "dev" }),
+      );
+    });
+  });
+
+  it.effect(
+    "falls back to the repository default when the configured base branch is missing",
+    () => {
+      const harness = makeHarness({
+        defaultWorktreeBaseBranch: "missing",
+        localBranchNames: ["main", "dev"],
+        refs: [
+          { name: "main", current: false, isDefault: true, worktreePath: "/repo/project" },
+          { name: "dev", current: true, isDefault: false, worktreePath: null },
+        ],
+      });
+      return Effect.gen(function* () {
+        const result = yield* runHandoff(harness, { branch: "feature/missing-default" });
+
+        expect(result.baseRef).toBe("main");
+        expect(harness.createWorktree).toHaveBeenCalledWith(
+          expect.objectContaining({ refName: "main", baseRefName: "main" }),
+        );
+      });
+    },
+  );
 
   it.effect("fails when the thread is already attached to a worktree", () => {
     const harness = makeHarness({

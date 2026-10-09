@@ -9,6 +9,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
+  DEFAULT_SERVER_SETTINGS,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -54,7 +55,9 @@ import { buildModelOptions } from "../../lib/modelOptions";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useEnvironmentServerConfig } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
+import { usePaginatedBranches } from "../../state/queries";
 import { serverEnvironment } from "../../state/server";
+import { vcsEnvironment } from "../../state/vcs";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import { resolveNewTaskBranchLabel } from "../threads/new-task-context-presentation";
@@ -74,8 +77,15 @@ import {
   type ScheduledTaskDraft as Draft,
 } from "./scheduledTaskDraft";
 import { settingsTargetsForProject } from "./settings-environment-filter.logic";
+import {
+  resolveDefaultWorktreeBaseBranch,
+  resolveProjectSettings,
+} from "@t3tools/shared/projectSettings";
 import { useScheduledTaskEditor } from "./scheduled-task-editor";
-import { scheduledTaskEditorSessionAtom } from "./scheduled-task-editor-state";
+import {
+  scheduledTaskEditorSessionAtom,
+  seedScheduledTaskEditorBaseRef,
+} from "./scheduled-task-editor-state";
 import { appAtomRegistry } from "../../state/atom-registry";
 import {
   formatNextScheduledTaskRun,
@@ -523,6 +533,10 @@ function SettingsScheduledTaskEditorScreen({ title }: { readonly title: string }
             setDraft={(draft) => {
               if (!saving) setEditor({ ...editor, draft });
             }}
+            setBaseRef={(baseRef) => {
+              if (saving) return;
+              seedScheduledTaskEditorBaseRef(baseRef, readEditor());
+            }}
             onSaved={() => setSaved(true)}
             onChangeEnvironment={(target) => {
               if (target.environmentId === editor.environmentId) return;
@@ -561,6 +575,7 @@ function TaskForm({
   dictationPending,
   promptField,
   setDraft,
+  setBaseRef,
   onSaved,
   onChangeEnvironment,
 }: {
@@ -573,6 +588,7 @@ function TaskForm({
   readonly dictationPending: boolean;
   readonly promptField: ReactNode;
   readonly setDraft: (draft: Draft) => void;
+  readonly setBaseRef: (baseRef: string) => void;
   readonly onSaved: () => void;
   readonly onChangeEnvironment: (target: SettingsTarget) => void;
 }) {
@@ -582,6 +598,66 @@ function TaskForm({
   );
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const config = useEnvironmentServerConfig(environmentId);
+  const selectedProject = projects.find((project) => project.id === draft.projectId) ?? null;
+  const defaultWorktreeBaseBranch = resolveProjectSettings(
+    config?.settings ?? DEFAULT_SERVER_SETTINGS,
+    selectedProject?.id ?? null,
+    selectedProject,
+  ).settings.defaultWorktreeBaseBranch;
+  const branchState = usePaginatedBranches({
+    environmentId,
+    cwd: selectedProject?.workspaceRoot ?? null,
+    query: "",
+  });
+  const defaultWorktreeBaseBranchRefsQuery = useEnvironmentQuery(
+    selectedProject !== null && defaultWorktreeBaseBranch !== null
+      ? vcsEnvironment.listRefs({
+          environmentId,
+          input: {
+            cwd: selectedProject.workspaceRoot,
+            query: defaultWorktreeBaseBranch,
+            includeMatchingRemoteRefs: true,
+            limit: 200,
+          },
+        })
+      : null,
+  );
+  useEffect(() => {
+    if (
+      draft.workspace !== "worktree" ||
+      draft.baseRef ||
+      selectedProject === null ||
+      config === null ||
+      (branchState.isPending && branchState.data === null) ||
+      (defaultWorktreeBaseBranch !== null &&
+        defaultWorktreeBaseBranchRefsQuery.isPending &&
+        defaultWorktreeBaseBranchRefsQuery.data === null)
+    ) {
+      return;
+    }
+    const baseRef = resolveDefaultWorktreeBaseBranch({
+      configuredBranch: defaultWorktreeBaseBranch,
+      configuredBranchRefs: [
+        ...branchState.refs,
+        ...(defaultWorktreeBaseBranchRefsQuery.data?.refs ?? []),
+      ],
+      repoDefaultBranch: branchState.refs.find((branch) => branch.isDefault)?.name ?? null,
+      currentBranch: branchState.refs.find((branch) => branch.current)?.name ?? null,
+    });
+    setBaseRef(baseRef ?? "main");
+  }, [
+    branchState.data,
+    branchState.isPending,
+    branchState.refs,
+    config,
+    defaultWorktreeBaseBranch,
+    defaultWorktreeBaseBranchRefsQuery.data,
+    defaultWorktreeBaseBranchRefsQuery.isPending,
+    draft.baseRef,
+    draft.workspace,
+    selectedProject,
+    setBaseRef,
+  ]);
   const modelOptions = useMemo(() => buildModelOptions(config, null), [config]);
   const canOperate = useAtomValue(
     serverEnvironment.upsertScheduledTask.permissionAtom(environmentId),
@@ -761,6 +837,7 @@ function TaskForm({
               setDraft({
                 ...draft,
                 projectId: project.id,
+                baseRef: "",
                 modelSelection: draft.modelSelectionIsExplicit
                   ? draft.modelSelection
                   : scheduledTaskDefaultModel(config, project),

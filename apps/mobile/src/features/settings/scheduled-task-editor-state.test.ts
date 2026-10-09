@@ -5,6 +5,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { createDraft } from "./scheduledTaskDraft";
 import {
   readScheduledTaskEditor,
+  seedScheduledTaskEditorBaseRef,
   scheduledTaskEditorSessionAtom,
   startScheduledTaskEditor,
   updateScheduledTaskEditor,
@@ -45,6 +46,17 @@ describe("scheduled task voice draft", () => {
     expect(appAtomRegistry.get(scheduledTaskEditorSessionAtom)?.current?.draft.prompt).toBe(
       "other task",
     );
+  });
+
+  it("keeps an automatically seeded base branch in the draft baseline", () => {
+    startScheduledTaskEditor(editor);
+    const current = appAtomRegistry.get(scheduledTaskEditorSessionAtom)!;
+
+    seedScheduledTaskEditorBaseRef("dev", current.current);
+
+    const seeded = appAtomRegistry.get(scheduledTaskEditorSessionAtom)!;
+    expect(seeded.current?.draft.baseRef).toBe("dev");
+    expect(seeded.initial?.draft.baseRef).toBe("dev");
   });
 
   it("does not restore the default prompt after the editor is discarded", () => {

@@ -441,7 +441,12 @@ export function BranchPickerScreen(props: {
         isFirst={index === 0}
         isLast={index === props.branches.length - 1}
         onSelect={props.onSelect}
-        selected={selectedBranchName === item.name}
+        selected={
+          selectedBranchName === item.name ||
+          (item.isRemote === true &&
+            item.remoteName !== undefined &&
+            item.name === `${item.remoteName}/${selectedBranchName}`)
+        }
       />
     ),
     [

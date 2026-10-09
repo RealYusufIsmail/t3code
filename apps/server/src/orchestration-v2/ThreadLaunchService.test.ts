@@ -25,6 +25,7 @@ import {
   ScheduledTaskId,
   type ServerProvider,
   ThreadId,
+  type VcsRef,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -107,6 +108,9 @@ interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
+  readonly localBranches?: ReadonlyArray<string>;
+  readonly refs?: ReadonlyArray<VcsRef>;
+  readonly currentBranch?: string | null;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -143,6 +147,14 @@ function makeHarness(options: HarnessOptions = {}) {
   const generateThreadTitle = vi.fn(
     options.generateTitle ?? (() => Effect.succeed({ title: "Generated title" })),
   );
+  const refs = options.refs ?? [
+    {
+      name: "main",
+      current: true,
+      isDefault: true,
+      worktreePath: "/repo",
+    },
+  ];
   const layerExternalServices = Layer.mergeAll(
     WorktreeSetupTracker.layer,
     Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
@@ -167,6 +179,34 @@ function makeHarness(options: HarnessOptions = {}) {
     }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
       createWorktree,
+      listLocalBranchNames: () => Effect.succeed([...(options.localBranches ?? ["main"])]),
+      listRefs: (input) => {
+        const matching = refs
+          .filter((ref) =>
+            input.refKind === "local"
+              ? ref.isRemote !== true
+              : input.refKind === "remote"
+                ? ref.isRemote === true
+                : true,
+          )
+          .filter((ref) => input.query === undefined || ref.name.includes(input.query));
+        return Effect.succeed({
+          refs: matching.slice(0, input.limit ?? 200),
+          isRepo: true,
+          hasPrimaryRemote: true,
+          nextCursor: null,
+          totalCount: matching.length,
+        });
+      },
+      localStatus: () =>
+        Effect.succeed({
+          isRepo: true,
+          hasPrimaryRemote: true,
+          isDefaultRef: false,
+          refName: options.currentBranch === undefined ? "main" : options.currentBranch,
+          hasWorkingTreeChanges: false,
+          workingTree: { files: [], insertions: 0, deletions: 0 },
+        }),
       renameBranch,
       fetchRemote: options.fetchRemote ?? (() => Effect.void),
       hasCommit: options.hasCommit ?? (() => Effect.succeed(false)),
@@ -288,6 +328,54 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
     assert.fail("Condition was not reached before timeout.");
   });
 }
+
+it.effect("resolves the project worktree base setting when it exists on a remote", () => {
+  const harness = makeHarness({
+    serverSettings: {
+      defaultWorktreeBaseBranch: "release",
+      projectSettingsOverrides: {
+        [projectId]: { defaultWorktreeBaseBranch: "dev" },
+      },
+    },
+    localBranches: ["main"],
+    refs: [
+      { name: "main", current: true, isDefault: true, worktreePath: "/repo" },
+      {
+        name: "origin/dev",
+        isRemote: true,
+        remoteName: "origin",
+        current: false,
+        isDefault: false,
+        worktreePath: null,
+      },
+    ],
+  });
+  return Effect.gen(function* () {
+    const launch = yield* ThreadLaunch.ThreadLaunchService;
+    const baseBranch = yield* launch.resolveDefaultWorktreeBaseBranch({
+      commandId: CommandId.make("command:default-base-branch"),
+      projectId,
+    });
+    assert.equal(baseBranch, "dev");
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("falls back to the repository default when the configured branch is missing", () => {
+  const harness = makeHarness({
+    serverSettings: { defaultWorktreeBaseBranch: "missing" },
+    localBranches: ["main"],
+    refs: [{ name: "main", current: true, isDefault: true, worktreePath: "/repo" }],
+    currentBranch: "feature/current",
+  });
+  return Effect.gen(function* () {
+    const launch = yield* ThreadLaunch.ThreadLaunchService;
+    const baseBranch = yield* launch.resolveDefaultWorktreeBaseBranch({
+      commandId: CommandId.make("command:default-base-branch-missing"),
+      projectId,
+    });
+    assert.equal(baseBranch, "main");
+  }).pipe(Effect.provide(harness.layer));
+});
 
 it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>
@@ -2025,6 +2113,7 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
             ),
           ),
         retryPreparation: launches.retryPreparation,
+        resolveDefaultWorktreeBaseBranch: launches.resolveDefaultWorktreeBaseBranch,
       }),
       Effect.flip,
     );

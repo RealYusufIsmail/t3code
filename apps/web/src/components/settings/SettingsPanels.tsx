@@ -641,6 +641,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
         ? ["New worktrees start from origin"]
         : []),
+      ...(settings.defaultWorktreeBaseBranch !== DEFAULT_UNIFIED_SETTINGS.defaultWorktreeBaseBranch
+        ? ["Default worktree base branch"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -686,6 +689,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
+      settings.defaultWorktreeBaseBranch,
       settings.diffFilesCollapsed,
       settings.diffIgnoreWhitespace,
       settings.diffLayout,
@@ -826,6 +830,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
+      defaultWorktreeBaseBranch: DEFAULT_UNIFIED_SETTINGS.defaultWorktreeBaseBranch,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -2247,6 +2252,7 @@ export function GeneralSettingsPanel() {
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
   const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
   const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
+  const mixedDefaultWorktreeBaseBranch = useScopedSettingsMixed(["defaultWorktreeBaseBranch"]);
   const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
@@ -3070,6 +3076,42 @@ export function GeneralSettingsPanel() {
                 updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
               }
               aria-label="Start new worktrees from origin by default"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          settingKeys={["defaultWorktreeBaseBranch"]}
+          {...searchableSetting("default-worktree-base-branch")}
+          description="Leave empty to use the repository default branch, then the checked-out branch."
+          resetAction={
+            settings.defaultWorktreeBaseBranch !==
+            DEFAULT_UNIFIED_SETTINGS.defaultWorktreeBaseBranch ? (
+              <SettingResetButton
+                label="default worktree base branch"
+                onClick={() =>
+                  updateSettings({
+                    defaultWorktreeBaseBranch: DEFAULT_UNIFIED_SETTINGS.defaultWorktreeBaseBranch,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              size="sm"
+              className="w-full sm:w-72"
+              value={
+                mixedDefaultWorktreeBaseBranch ? "" : (settings.defaultWorktreeBaseBranch ?? "")
+              }
+              onCommit={(next) =>
+                updateSettings({ defaultWorktreeBaseBranch: next.trim() || null })
+              }
+              placeholder={mixedDefaultWorktreeBaseBranch ? "Mixed" : "Repository default"}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              aria-label="Default worktree base branch"
             />
           }
         />

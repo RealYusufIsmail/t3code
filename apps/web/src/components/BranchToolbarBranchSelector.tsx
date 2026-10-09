@@ -53,6 +53,7 @@ import {
   resolveBranchToolbarPrBranch,
   resolveBranchSelectionTarget,
   resolveBranchToolbarValue,
+  resolveDefaultWorktreeBaseBranch,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   sanitizeNewRefName,
@@ -89,6 +90,8 @@ interface BranchToolbarBranchSelectorProps {
   onActiveThreadBranchOverrideChange?: (refName: string | null) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
+  defaultWorktreeBaseBranch?: string | null;
+  defaultWorktreeBaseBranchReady?: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
 }
@@ -111,6 +114,8 @@ export function BranchToolbarBranchSelector({
   onActiveThreadBranchOverrideChange,
   startFromOrigin,
   onStartFromOriginChange,
+  defaultWorktreeBaseBranch = null,
+  defaultWorktreeBaseBranchReady = true,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
 }: BranchToolbarBranchSelectorProps) {
@@ -259,6 +264,19 @@ export function BranchToolbarBranchSelector({
     cwd: branchCwd,
     query: branchRefQuery,
   });
+  const configuredBaseBranchRefsQuery = useEnvironmentQuery(
+    branchCwd !== null && defaultWorktreeBaseBranch !== null
+      ? vcsEnvironment.listRefs({
+          environmentId,
+          input: {
+            cwd: branchCwd,
+            query: defaultWorktreeBaseBranch,
+            includeMatchingRemoteRefs: true,
+            limit: 200,
+          },
+        })
+      : null,
+  );
   const refs = branchRefState.refs;
   const hasNextPage =
     branchRefState.data?.nextCursor !== null && branchRefState.data?.nextCursor !== undefined;
@@ -350,12 +368,28 @@ export function BranchToolbarBranchSelector({
   const queriedActiveBranch = activeBranchRefQuery.data?.refs.find(
     (refName) => refName.name === resolvedActiveBranch,
   );
+  const configuredBaseBranchIsRemoteOnly =
+    defaultWorktreeBaseBranch !== null &&
+    (configuredBaseBranchRefsQuery.data?.refs.some(
+      (ref) =>
+        ref.isRemote === true &&
+        ref.remoteName !== undefined &&
+        ref.name === `${ref.remoteName}/${defaultWorktreeBaseBranch}`,
+    ) ??
+      false) &&
+    !(
+      configuredBaseBranchRefsQuery.data?.refs.some(
+        (ref) => ref.isRemote !== true && ref.name === defaultWorktreeBaseBranch,
+      ) ?? false
+    );
   const resolvedActiveBranchIsRemote =
     listedActiveBranch !== null
       ? listedActiveBranch.isRemote === true
       : queriedActiveBranch
         ? queriedActiveBranch.isRemote === true
-        : null;
+        : resolvedActiveBranch === defaultWorktreeBaseBranch && configuredBaseBranchIsRemoteOnly
+          ? false
+          : null;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
@@ -534,9 +568,21 @@ export function BranchToolbarBranchSelector({
     () => refs.find((refName) => refName.isDefault)?.name ?? null,
     [refs],
   );
-  const worktreeBaseBranchCandidate = isInitialBranchesLoadPending
-    ? null
-    : (defaultBranchName ?? currentGitBranch);
+  const isConfiguredBaseBranchLoadPending =
+    !defaultWorktreeBaseBranchReady ||
+    (defaultWorktreeBaseBranch !== null &&
+      branchCwd !== null &&
+      configuredBaseBranchRefsQuery.isPending &&
+      configuredBaseBranchRefsQuery.data === null);
+  const worktreeBaseBranchCandidate =
+    isInitialBranchesLoadPending || isConfiguredBaseBranchLoadPending
+      ? null
+      : resolveDefaultWorktreeBaseBranch({
+          configuredBranch: defaultWorktreeBaseBranch,
+          configuredBranchRefs: configuredBaseBranchRefsQuery.data?.refs ?? [],
+          repoDefaultBranch: defaultBranchName,
+          currentBranch: currentGitBranch,
+        });
 
   useEffect(() => {
     if (

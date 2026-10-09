@@ -187,7 +187,7 @@ export function createDraft(
     modelSelectionIsExplicit: false,
     schedule: DEFAULT_SCHEDULE,
     workspace: "worktree",
-    baseRef: "main",
+    baseRef: "",
     checkoutPath: "",
     enabled: true,
     startFromOrigin: true,
@@ -205,7 +205,7 @@ export function editDraft(task: ScheduledTask): ScheduledTaskDraft {
     modelSelectionIsExplicit: true,
     schedule: scheduleDraftForTask(task),
     workspace: task.workspaceStrategy.type,
-    baseRef: task.workspaceStrategy.type === "worktree" ? task.workspaceStrategy.baseRef : "main",
+    baseRef: task.workspaceStrategy.type === "worktree" ? task.workspaceStrategy.baseRef : "",
     checkoutPath:
       task.workspaceStrategy.type === "existing_worktree"
         ? task.workspaceStrategy.worktreePath

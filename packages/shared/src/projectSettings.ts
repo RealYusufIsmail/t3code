@@ -10,9 +10,30 @@ import {
   type ServerSettings,
   type T3ProjectFile,
   type ThreadEnvMode,
+  type VcsRef,
   type WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { isModelSelectionProviderEnabled } from "./serverSettings.ts";
+
+export function resolveDefaultWorktreeBaseBranch(input: {
+  readonly configuredBranch: string | null;
+  readonly configuredBranchRefs: readonly Pick<VcsRef, "name" | "isRemote" | "remoteName">[];
+  readonly repoDefaultBranch: string | null;
+  readonly currentBranch: string | null;
+}): string | null {
+  const configuredBranch = input.configuredBranch?.trim();
+  if (
+    configuredBranch &&
+    input.configuredBranchRefs.some((ref) =>
+      ref.isRemote === true
+        ? ref.remoteName !== undefined && ref.name === `${ref.remoteName}/${configuredBranch}`
+        : ref.name === configuredBranch,
+    )
+  ) {
+    return configuredBranch;
+  }
+  return input.repoDefaultBranch ?? input.currentBranch;
+}
 
 /**
  * Where a project-scoped value came from. The order is the priority order:

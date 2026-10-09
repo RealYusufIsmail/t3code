@@ -465,6 +465,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["new worktrees latest matching remote branch local"],
   },
   {
+    id: "default-worktree-base-branch",
+    title: "Default worktree base branch",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["new worktrees branch origin main dev repository default checked out"],
+  },
+  {
     id: "add-project-starts-in",
     title: "Add project starts in",
     to: "/settings/general",

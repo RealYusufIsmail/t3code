@@ -10,6 +10,7 @@ import { createModelSelection } from "./model.ts";
 import {
   clearProjectSettingsOverrides,
   hasProjectSettingsOverrides,
+  resolveDefaultWorktreeBaseBranch,
   resolveProjectFileBackedSetting,
   resolveProjectSettings,
   resolveWorktreeCleanup,
@@ -58,6 +59,41 @@ describe("resolveProjectSettings", () => {
     );
   });
 
+  it("uses a configured branch only when a matching local or remote ref exists", () => {
+    expect(
+      resolveDefaultWorktreeBaseBranch({
+        configuredBranch: "dev",
+        configuredBranchRefs: [{ name: "dev", isRemote: false }],
+        repoDefaultBranch: "main",
+        currentBranch: "feature/current",
+      }),
+    ).toBe("dev");
+    expect(
+      resolveDefaultWorktreeBaseBranch({
+        configuredBranch: "dev",
+        configuredBranchRefs: [{ name: "origin/dev", isRemote: true, remoteName: "origin" }],
+        repoDefaultBranch: "main",
+        currentBranch: "feature/current",
+      }),
+    ).toBe("dev");
+    expect(
+      resolveDefaultWorktreeBaseBranch({
+        configuredBranch: "missing",
+        configuredBranchRefs: [{ name: "dev", isRemote: false }],
+        repoDefaultBranch: "main",
+        currentBranch: "feature/current",
+      }),
+    ).toBe("main");
+    expect(
+      resolveDefaultWorktreeBaseBranch({
+        configuredBranch: null,
+        configuredBranchRefs: [],
+        repoDefaultBranch: null,
+        currentBranch: "feature/current",
+      }),
+    ).toBe("feature/current");
+  });
+
   it("applies overrides per key and reports their source", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       defaultAutoPull: true,
@@ -74,6 +110,23 @@ describe("resolveProjectSettings", () => {
     expect(resolved.sources.sidebarAutoSettleAfterDays).toBe("project");
     expect(resolved.sources.defaultThreadEnvMode).toBe("environment");
     expect(resolveProjectSettings(settings, otherProjectId).settings.defaultAutoPull).toBe(true);
+  });
+
+  it("keeps a project null override as an explicit repository-default choice", () => {
+    const settings = applyServerSettingsPatch(
+      { ...DEFAULT_SERVER_SETTINGS, defaultWorktreeBaseBranch: "main" },
+      {
+        projectSettingsOverrides: {
+          [projectId]: { defaultWorktreeBaseBranch: null },
+        },
+      },
+    );
+    const resolved = resolveProjectSettings(settings, projectId);
+    expect(resolved.settings.defaultWorktreeBaseBranch).toBeNull();
+    expect(resolved.sources.defaultWorktreeBaseBranch).toBe("project");
+    expect(
+      resolveProjectSettings(settings, otherProjectId).settings.defaultWorktreeBaseBranch,
+    ).toBe("main");
   });
 
   it("keeps the environment text generation model when the override's provider is disabled", () => {

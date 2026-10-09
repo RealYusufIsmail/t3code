@@ -50,6 +50,8 @@ export interface ThreadDetailsPanelProps extends Pick<
   onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
+  defaultWorktreeBaseBranch?: string | null;
+  defaultWorktreeBaseBranchReady?: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest: () => void;
   onOpenChanges?: () => void;
@@ -75,6 +77,12 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     onEnvModeChange: props.onEnvModeChange,
     startFromOrigin: props.startFromOrigin,
     onStartFromOriginChange: props.onStartFromOriginChange,
+    ...(props.defaultWorktreeBaseBranch === undefined
+      ? {}
+      : { defaultWorktreeBaseBranch: props.defaultWorktreeBaseBranch }),
+    ...(props.defaultWorktreeBaseBranchReady === undefined
+      ? {}
+      : { defaultWorktreeBaseBranchReady: props.defaultWorktreeBaseBranchReady }),
     envMode: props.envMode,
     ...(props.activeThreadBranchOverride !== undefined
       ? { activeThreadBranchOverride: props.activeThreadBranchOverride }

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import type { ProjectId } from "./baseSchemas.ts";
+import { ProjectId } from "./baseSchemas.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
+  isNullableProjectSettingsOverride,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
@@ -848,6 +849,24 @@ describe("ServerSettings worktree defaults", () => {
 
   it("defaults start-from-origin on for legacy configs", () => {
     expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
+  });
+
+  it("defaults the base branch to the repository default and preserves explicit project null", () => {
+    expect(decodeServerSettings({}).defaultWorktreeBaseBranch).toBeNull();
+    expect(
+      decodeServerSettings({ defaultWorktreeBaseBranch: "  dev  " }).defaultWorktreeBaseBranch,
+    ).toBe("dev");
+    expect(
+      decodeServerSettingsPatch({ defaultWorktreeBaseBranch: "  dev  " }).defaultWorktreeBaseBranch,
+    ).toBe("dev");
+    expect(() => decodeServerSettingsPatch({ defaultWorktreeBaseBranch: "   " })).toThrow();
+
+    const projectId = ProjectId.make("project");
+    const settings = decodeServerSettings({
+      projectSettingsOverrides: { [projectId]: { defaultWorktreeBaseBranch: null } },
+    });
+    expect(settings.projectSettingsOverrides[projectId]?.defaultWorktreeBaseBranch).toBeNull();
+    expect(isNullableProjectSettingsOverride("defaultWorktreeBaseBranch")).toBe(true);
   });
 
   it("accepts start-from-origin updates", () => {

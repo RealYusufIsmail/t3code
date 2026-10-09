@@ -8,7 +8,9 @@ import {
   type WorktreeMcpHandoffResult,
   type WorktreeMcpSetupScriptStatus,
   type WorktreeMcpStatusResult,
+  type VcsRef,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -48,6 +50,22 @@ function errorMessage(error: unknown): string {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+function matchesRemoteBranch(ref: VcsRef, branchName: string): boolean {
+  return (
+    ref.isRemote === true &&
+    ref.remoteName !== undefined &&
+    ref.name === `${ref.remoteName}/${branchName}`
+  );
+}
+
+function branchNameForRef(ref: VcsRef): string {
+  return ref.isRemote === true &&
+    ref.remoteName !== undefined &&
+    ref.name.startsWith(`${ref.remoteName}/`)
+    ? ref.name.slice(ref.remoteName.length + 1)
+    : ref.name;
 }
 
 const asOperationFailed = (prefix: string) =>
@@ -121,10 +139,15 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const readDefaultStartFromOrigin = serverSettings.getSettings.pipe(
-    Effect.map((settings) => settings.newWorktreesStartFromOrigin),
-    asOperationFailed("Unable to read server settings"),
-  );
+  const readProjectWorktreeDefaults = (projectId: ProjectId) =>
+    serverSettings.getSettings.pipe(
+      Effect.map((settings) => resolveProjectSettings(settings, projectId).settings),
+      Effect.map((settings) => ({
+        baseBranch: settings.defaultWorktreeBaseBranch,
+        startFromOrigin: settings.newWorktreesStartFromOrigin,
+      })),
+      asOperationFailed("Unable to read server settings"),
+    );
 
   const handoffIds = (scope: McpThreadInvocationScope) =>
     crypto.randomUUIDv4.pipe(
@@ -218,17 +241,43 @@ const make = Effect.gen(function* () {
     }
 
     let baseRef = input.baseRef;
+    const worktreeDefaults = yield* readProjectWorktreeDefaults(project.id);
     if (baseRef === undefined) {
-      if (localStatus.refName === null) {
+      const configuredBaseBranch = worktreeDefaults.baseBranch;
+      if (configuredBaseBranch !== null && localBranchNames.includes(configuredBaseBranch)) {
+        baseRef = configuredBaseBranch;
+      } else if (configuredBaseBranch !== null) {
+        const configuredRemoteRefs = yield* gitWorkflow
+          .listRefs({
+            cwd: projectCwd,
+            query: configuredBaseBranch,
+            refKind: "remote",
+            includeMatchingRemoteRefs: true,
+            limit: 200,
+          })
+          .pipe(asOperationFailed("Unable to check the configured base branch"));
+        if (
+          configuredRemoteRefs.refs.some((ref) => matchesRemoteBranch(ref, configuredBaseBranch))
+        ) {
+          baseRef = configuredBaseBranch;
+        }
+      }
+      if (baseRef === undefined) {
+        const repoRefs = yield* gitWorkflow
+          .listRefs({ cwd: projectCwd, limit: 200 })
+          .pipe(asOperationFailed("Unable to list branches"));
+        const defaultRef = repoRefs.refs.find((ref) => ref.isDefault);
+        baseRef = defaultRef ? branchNameForRef(defaultRef) : (localStatus.refName ?? undefined);
+      }
+      if (baseRef === undefined) {
         return yield* failure(
           "invalid_request",
-          "Could not determine the current branch of the project workspace (detached HEAD?). Pass baseRef explicitly.",
+          "Could not determine a default base branch for the project workspace (detached HEAD?). Pass baseRef explicitly.",
         );
       }
-      baseRef = localStatus.refName;
     }
 
-    const startFromOrigin = input.startFromOrigin ?? (yield* readDefaultStartFromOrigin);
+    const startFromOrigin = input.startFromOrigin ?? worktreeDefaults.startFromOrigin;
 
     let worktreeBaseRef = baseRef;
     if (startFromOrigin) {
@@ -479,7 +528,9 @@ const make = Effect.gen(function* () {
       const projection = yield* loadThread(scope);
       const project = yield* loadProject(scope, projection.thread.projectId);
 
-      const defaultStartFromOrigin = yield* readDefaultStartFromOrigin;
+      const { startFromOrigin: defaultStartFromOrigin } = yield* readProjectWorktreeDefaults(
+        project.id,
+      );
 
       const result: WorktreeMcpStatusResult = {
         attached: projection.thread.worktreePath !== null,

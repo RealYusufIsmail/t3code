@@ -91,6 +91,8 @@ interface BranchToolbarProps {
   onActiveThreadBranchOverrideChange?: (branch: string | null) => void;
   startFromOrigin: boolean;
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
+  defaultWorktreeBaseBranch?: string | null;
+  defaultWorktreeBaseBranchReady?: boolean;
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
@@ -607,6 +609,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   onActiveThreadBranchOverrideChange,
   startFromOrigin,
   onStartFromOriginChange,
+  defaultWorktreeBaseBranch = null,
+  defaultWorktreeBaseBranchReady = true,
   autoEnvironmentLabel,
   onAutoEnvironment,
   envLocked,
@@ -746,6 +750,8 @@ export const BranchToolbar = memo(function BranchToolbar({
             {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
             startFromOrigin={startFromOrigin}
             onStartFromOriginChange={onStartFromOriginChange}
+            defaultWorktreeBaseBranch={defaultWorktreeBaseBranch}
+            defaultWorktreeBaseBranchReady={defaultWorktreeBaseBranchReady}
             {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
             {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
           />
@@ -856,6 +862,8 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
           startFromOrigin={startFromOrigin}
           onStartFromOriginChange={onStartFromOriginChange}
+          defaultWorktreeBaseBranch={defaultWorktreeBaseBranch}
+          defaultWorktreeBaseBranchReady={defaultWorktreeBaseBranchReady}
           {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />

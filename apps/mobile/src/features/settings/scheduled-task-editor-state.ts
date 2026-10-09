@@ -29,6 +29,27 @@ export function startScheduledTaskEditor(next: ScheduledTaskEditor | null): void
   });
 }
 
+export function seedScheduledTaskEditorBaseRef(
+  baseRef: string,
+  fallbackEditor: ScheduledTaskEditor | null,
+): void {
+  const session = appAtomRegistry.get(scheduledTaskEditorSessionAtom);
+  const current = session?.current ?? fallbackEditor;
+  if (current === null || current.draft.baseRef !== "") return;
+
+  const nextCurrent = { ...current, draft: { ...current.draft, baseRef } };
+  const initial = session?.initial ?? current;
+  const nextInitial =
+    initial !== null && initial.draft.task === null && initial.draft.baseRef === ""
+      ? { ...initial, draft: { ...initial.draft, baseRef } }
+      : initial;
+  appAtomRegistry.set(scheduledTaskEditorSessionAtom, {
+    id: session?.id ?? 0,
+    initial: nextInitial,
+    current: nextCurrent,
+  });
+}
+
 export function updateScheduledTaskEditor(
   update:
     | ScheduledTaskEditor

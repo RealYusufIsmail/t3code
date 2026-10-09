@@ -11157,6 +11157,8 @@ export default function ChatView(props: ChatViewProps) {
       : {}),
     startFromOrigin,
     onStartFromOriginChange,
+    defaultWorktreeBaseBranch: activeProjectSettings.settings.defaultWorktreeBaseBranch,
+    defaultWorktreeBaseBranchReady: serverConfig !== null,
     ...(canCheckoutPullRequestIntoThread
       ? { onCheckoutPullRequestRequest: openPullRequestDialog }
       : {}),
@@ -11794,6 +11796,10 @@ export default function ChatView(props: ChatViewProps) {
                                 onEnvModeChange={onEnvModeChange}
                                 startFromOrigin={startFromOrigin}
                                 onStartFromOriginChange={onStartFromOriginChange}
+                                defaultWorktreeBaseBranch={
+                                  activeProjectSettings.settings.defaultWorktreeBaseBranch
+                                }
+                                defaultWorktreeBaseBranchReady={serverConfig !== null}
                                 envMode={envMode}
                                 {...(canOverrideServerThreadEnvMode
                                   ? {

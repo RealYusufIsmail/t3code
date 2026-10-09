@@ -24,6 +24,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { DEFAULT_WEBHOOK_PROMPT } from "@t3tools/client-runtime/scheduled-task-webhook";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
   MIN_SCHEDULED_TASK_INTERVAL_MS,
@@ -125,7 +126,7 @@ const EMPTY_DRAFT: DraftState = {
   projectId: "",
   threadId: "",
   workspaceMode: "worktree",
-  baseRef: "main",
+  baseRef: "",
   startFromOrigin: true,
   existingWorktreePath: "",
   modelKey: "",
@@ -827,6 +828,10 @@ function ScheduledTaskEditorDialog({
     : task;
   const selectedProjectId = draft.projectId || projects[0]?.id || "";
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const defaultWorktreeBaseBranch = environment?.serverConfig
+    ? resolveProjectSettings(environment.serverConfig.settings, selectedProject?.id ?? null)
+        .settings.defaultWorktreeBaseBranch
+    : undefined;
 
   // The real model picker is keyed by a `${instanceId}:${model}` string, which
   // is exactly how the draft stores its selection.
@@ -982,7 +987,7 @@ function ScheduledTaskEditorDialog({
                     projectId: "",
                     modelKey: "",
                     baseModelSelection: null,
-                    baseRef: "main",
+                    baseRef: "",
                     startFromOrigin: true,
                     existingWorktreePath: "",
                   }));
@@ -1038,7 +1043,11 @@ function ScheduledTaskEditorDialog({
                 <Select
                   value={selectedProjectId}
                   onValueChange={(projectId) =>
-                    setDraft((current) => ({ ...current, projectId: projectId ?? "" }))
+                    setDraft((current) => ({
+                      ...current,
+                      projectId: projectId ?? "",
+                      baseRef: "",
+                    }))
                   }
                 >
                   <SelectTrigger size="sm" id="scheduled-task-project">
@@ -1083,6 +1092,7 @@ function ScheduledTaskEditorDialog({
                   environmentId={environmentId}
                   cwd={selectedProject?.workspaceRoot ?? null}
                   value={draft.baseRef}
+                  defaultWorktreeBaseBranch={defaultWorktreeBaseBranch}
                   onValueChange={(baseRef) => setDraft((current) => ({ ...current, baseRef }))}
                   startFromOrigin={draft.startFromOrigin}
                   onStartFromOriginChange={(startFromOrigin) =>

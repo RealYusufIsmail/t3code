@@ -3,7 +3,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text, AppTextInput } from "../../components/AppText";
 import {
   type ResponseStreamingMode,
   type ServerSettings,
@@ -28,6 +28,7 @@ import {
 import { BranchNamingSettings } from "./components/BranchNamingSettings";
 import { SettingsChoiceRow } from "./components/SettingsChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
+import { SettingsControlRow } from "./components/SettingsControlRow";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsProjectOverridesSection } from "./components/SettingsProjectOverridesSection";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
@@ -54,6 +55,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
     "defaultAutoPull",
     "removeAgentCreditsOnMerge",
     "newWorktreesStartFromOrigin",
+    "defaultWorktreeBaseBranch",
     "branchNamingMode",
     "branchNamePrefix",
     "branchNameInstructions",
@@ -121,6 +123,36 @@ const STREAMING_CHOICES: ReadonlyArray<{
     description: "Show each paragraph or code block as it completes.",
   },
 ];
+
+function DefaultWorktreeBaseBranchInput(props: {
+  readonly value: string | null;
+  readonly mixed: boolean;
+  readonly disabled: boolean;
+  readonly onCommit: (value: string | null) => void;
+}) {
+  const edited = useRef(false);
+  return (
+    <AppTextInput
+      accessibilityLabel="Default worktree base branch"
+      defaultValue={props.value ?? ""}
+      placeholder={props.mixed ? "Mixed" : "Repository default"}
+      editable={!props.disabled}
+      autoCapitalize="none"
+      autoCorrect={false}
+      className="min-h-10 w-36 rounded-xl px-3 py-2 text-sm text-foreground"
+      onChangeText={() => {
+        edited.current = true;
+      }}
+      onEndEditing={(event) => {
+        const value = event.nativeEvent.text.trim();
+        if (!props.disabled && edited.current && (props.mixed || value !== props.value)) {
+          props.onCommit(value || null);
+        }
+        edited.current = false;
+      }}
+    />
+  );
+}
 
 export function SettingsEnvironmentNewThreadsRouteScreen() {
   return <ServerSettingsDetail page="new-threads" />;
@@ -387,6 +419,20 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       disabled={disabledFor("newWorktreesStartFromOrigin")}
                       onValueChange={(value) => write({ newWorktreesStartFromOrigin: value })}
                     />
+                    <SettingsControlRow
+                      icon="arrow.triangle.branch"
+                      label="Default base branch"
+                      subtitle="Empty uses the repository default, then the checked-out branch."
+                      disabled={disabledFor("defaultWorktreeBaseBranch")}
+                    >
+                      <DefaultWorktreeBaseBranchInput
+                        key={`${reference?.environment.environmentId ?? "none"}:${reference?.projectId ?? "environment"}:${uniform("defaultWorktreeBaseBranch") ?? "null"}:${isMixed("defaultWorktreeBaseBranch")}`}
+                        value={uniform("defaultWorktreeBaseBranch")}
+                        mixed={isMixed("defaultWorktreeBaseBranch")}
+                        disabled={disabledFor("defaultWorktreeBaseBranch")}
+                        onCommit={(value) => write({ defaultWorktreeBaseBranch: value })}
+                      />
+                    </SettingsControlRow>
                   </SettingsSection>
                 </>
               ) : null}

@@ -18,6 +18,7 @@ import {
   type RuntimeMode,
   type ScheduledTaskId,
   ThreadId,
+  type VcsRef,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -153,6 +154,10 @@ export class ThreadLaunchService extends Context.Service<
     readonly launch: (
       input: ThreadLaunchInput,
     ) => Effect.Effect<ThreadLaunchResult, ThreadLaunchError>;
+    readonly resolveDefaultWorktreeBaseBranch: (input: {
+      readonly commandId: CommandId;
+      readonly projectId: ProjectId;
+    }) => Effect.Effect<string, ThreadLaunchError>;
     /** Dispatches prepared-run.retry and prepares the run's workspace again. */
     readonly retryPreparation: (
       input: ThreadLaunchRetryInput,
@@ -169,6 +174,22 @@ function failureDetail(error: unknown): string {
     return `Workspace preparation failed during ${error.operation.replaceAll("-", " ")}: ${detail}`;
   }
   return `Workspace preparation failed: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+function matchesRemoteBranch(ref: VcsRef, branchName: string): boolean {
+  return (
+    ref.isRemote === true &&
+    ref.remoteName !== undefined &&
+    ref.name === `${ref.remoteName}/${branchName}`
+  );
+}
+
+function branchNameForRef(ref: VcsRef): string {
+  return ref.isRemote === true &&
+    ref.remoteName !== undefined &&
+    ref.name.startsWith(`${ref.remoteName}/`)
+    ? ref.name.slice(ref.remoteName.length + 1)
+    : ref.name;
 }
 
 const make = Effect.gen(function* () {
@@ -199,6 +220,68 @@ const make = Effect.gen(function* () {
         ...(threadId === undefined ? {} : { threadId }),
         cause,
       });
+
+  const resolveDefaultWorktreeBaseBranch: ThreadLaunchService["Service"]["resolveDefaultWorktreeBaseBranch"] =
+    Effect.fn("ThreadLaunchService.resolveDefaultWorktreeBaseBranch")(function* (input) {
+      const error = (operation: ThreadLaunchError["operation"], cause: unknown) =>
+        new ThreadLaunchError({
+          operation,
+          commandId: input.commandId,
+          projectId: input.projectId,
+          cause,
+        });
+      const project = yield* projects.getById(input.projectId).pipe(
+        Effect.mapError((cause) => error("resolve-project", cause)),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.fail(error("resolve-project", "Project no longer exists.")),
+            onSome: Effect.succeed,
+          }),
+        ),
+      );
+      const settings = resolveProjectSettings(
+        yield* serverSettings.getSettings.pipe(
+          Effect.mapError((cause) => error("resolve-project", cause)),
+        ),
+        input.projectId,
+      ).settings;
+      const configuredBranch = settings.defaultWorktreeBaseBranch;
+      if (configuredBranch !== null) {
+        const localBranches = yield* git
+          .listLocalBranchNames(project.workspaceRoot)
+          .pipe(Effect.mapError((cause) => error("provision-worktree", cause)));
+        if (localBranches.includes(configuredBranch)) return configuredBranch;
+        const remoteRefs = yield* git
+          .listRefs({
+            cwd: project.workspaceRoot,
+            query: configuredBranch,
+            refKind: "remote",
+            includeMatchingRemoteRefs: true,
+            limit: 200,
+          })
+          .pipe(Effect.mapError((cause) => error("provision-worktree", cause)));
+        if (remoteRefs.refs.some((ref) => matchesRemoteBranch(ref, configuredBranch))) {
+          return configuredBranch;
+        }
+      }
+
+      const refs = yield* git
+        .listRefs({ cwd: project.workspaceRoot, limit: 200 })
+        .pipe(Effect.mapError((cause) => error("provision-worktree", cause)));
+      const defaultRef = refs.refs.find((ref) => ref.isDefault);
+      if (defaultRef) return branchNameForRef(defaultRef);
+
+      const status = yield* git
+        .localStatus({ cwd: project.workspaceRoot })
+        .pipe(Effect.mapError((cause) => error("provision-worktree", cause)));
+      if (status.refName !== null) return status.refName;
+      return yield* Effect.fail(
+        error(
+          "provision-worktree",
+          new Error("Could not determine a default base branch for the project workspace."),
+        ),
+      );
+    });
 
   const readReceipt = (input: ThreadLaunchInput, commandId: CommandId) =>
     receipts
@@ -977,7 +1060,7 @@ const make = Effect.gen(function* () {
     );
   };
 
-  return ThreadLaunchService.of({ launch, retryPreparation });
+  return ThreadLaunchService.of({ launch, resolveDefaultWorktreeBaseBranch, retryPreparation });
 });
 
 export const layer = Layer.effect(ThreadLaunchService, make);
